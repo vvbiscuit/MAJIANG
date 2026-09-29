@@ -20,6 +20,7 @@ enum class Difficulty
     Hard
 };
 
+// ex
 struct Exercise
 {
     vector<int> tiles;
