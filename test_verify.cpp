@@ -310,10 +310,41 @@ int main()
         const char *expected;
     };
     const vector<Case> cases = {
-        {"4", true, "4"},     {"5 6", true, "5 6"},   {"5 5", true, "5"},
-        {"9 1 4", true, "1 4 9"}, {"4,7", true, "4 7"}, {"13", false, ""},
-        {"10", false, ""},    {"4.5", false, ""},     {"abc4", false, ""},
-        {"", true, ""},       {"7 ", true, "7"},      {"-3", false, ""},
+        // the three required modes: glued, comma separated, space separated
+        {"47", true, "4 7"},
+        {"4,7", true, "4 7"},
+        {"4 7", true, "4 7"},
+        // separators are interchangeable / optional / repeatable
+        {"4, 7", true, "4 7"},
+        {"4,,7", true, "4 7"},
+        {"4,7 8", true, "4 7 8"},
+        {"4747", true, "4 7"},
+        {"9", true, "9"},
+        {"7 ", true, "7"},
+        {"9 1 4", true, "1 4 9"},
+        {"13", true, "1 3"},
+        // full-width characters typed with a Chinese IME, in both the GBK
+        // (code page 936) and UTF-8 byte forms
+        {"4\xA3\xAC" "7", true, "4 7"},              // 4，7 (GBK)
+        {"4\xEF\xBC\x8C" "7", true, "4 7"},          // 4，7 (UTF-8)
+        {"4\xA1\xA2" "7", true, "4 7"},              // 4、7 (GBK)
+        {"4\xE3\x80\x81" "7", true, "4 7"},          // 4、7 (UTF-8)
+        {"\xA3\xB4\xA3\xB7", true, "4 7"},           // ４７ (GBK)
+        {"\xEF\xBC\x94\xEF\xBC\x97", true, "4 7"},   // ４７ (UTF-8)
+        {"2\xA3\xAC" "9", true, "2 9"},              // the real case from the log
+        // rejected input
+        {"", false, ""},
+        {"   ", false, ""},
+        {",", false, ""},
+        {"0", false, ""},
+        {"10", false, ""},
+        {"4.5", false, ""},
+        {"abc4", false, ""},
+        {"-3", false, ""},
+        {"5x6", false, ""},
+        {"\xEF\xBC\x90", false, ""},                 // ０ full-width zero
+        {"\xA3\xB0", false, ""},                     // ０ full-width zero (GBK)
+        {"\xC4\xE3", false, ""},                     // 你 (unrelated CJK)
     };
     long long bad5 = 0;
     for (const Case &tc : cases)
@@ -332,7 +363,52 @@ int main()
     cout << "[Test5] parsing failures: " << bad5 << "\n";
     cout.flush();
 
-    const long long total = bad1 + bad2 + bad3 + bad4 + bad5;
+    // ---- Test 6: the exact grading used by main() for the three input modes
+    cout << "\n[Test6] grading accepts \"23\", \"2,3\" and \"2 3\" for a hand "
+            "waiting on 2 and 3:\n";
+    const vector<int> hand = {1, 2, 2, 3, 4, 5, 6, 7, 7, 7, 9, 9, 9};
+    const set<int> waits = findWaitSet(hand);
+    string waitsText;
+    for (int w : waits)
+        waitsText += to_string(w) + " ";
+    cout << "  hand " << joined(hand) << " waits on {" << waitsText << "}\n";
+
+    long long bad6 = 0;
+    if (waits != set<int>{2, 3})
+    {
+        ++bad6;
+        cout << "  hand does not wait on exactly {2,3} as assumed\n";
+    }
+
+    struct GradeCase
+    {
+        const char *text;
+        bool expectCorrect;
+    };
+    const vector<GradeCase> gradeCases = {
+        {"23", true},   {"2,3", true}, {"2 3", true}, {"32", true},
+        {"2 3 ", true}, {"2\xA3\xAC" "3", true},        // 2，3 typed with a GBK IME
+        {"\xA3\xB2\xA3\xB3", true},                     // ２３ full-width
+        {"234", false}, {"2", false},  {"abc", false},
+        {"", false},    {"02", false},
+    };
+    for (const GradeCase &gc : gradeCases)
+    {
+        vector<int> nums;
+        const bool ok = parseWaitValues(gc.text, nums);
+        const set<int> userSet(nums.begin(), nums.end());
+        const bool correct = ok && (userSet == waits);
+        if (correct != gc.expectCorrect)
+        {
+            ++bad6;
+            cout << "  FAIL answer=\"" << gc.text << "\" -> correct=" << correct
+                 << " (expected " << gc.expectCorrect << ")\n";
+        }
+    }
+    cout << "[Test6] grading failures: " << bad6 << "\n";
+    cout.flush();
+
+    const long long total = bad1 + bad2 + bad3 + bad4 + bad5 + bad6;
     cout << "\n===== TOTAL PROBLEMS FOUND: " << total << " =====\n";
     cout << "DONE\n";
     cout.flush();

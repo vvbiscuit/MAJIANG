@@ -598,30 +598,125 @@ string tileString(int value)
     return to_string(value);
 }
 
-// Turns "4 7" (or "4,7") into {4, 7}. Returns false when the text is not a
-// clean list of single tile numbers 1..9, so that a typo like "13" or "4.5"
-// can no longer be silently accepted as a valid answer.
+enum class AnswerToken
+{
+    Tile,
+    Separator,
+    Invalid
+};
+
+struct DecodedAnswer
+{
+    AnswerToken token;
+    int tileValue; // only meaningful when token == Tile
+    size_t length; // bytes consumed
+};
+
+// Decodes one element of the typed answer.
+//
+// A wait is always a single digit 1..9, so the grouping of the digits is
+// irrelevant: "47", "4,7" and "4 7" all mean {4, 7}. Space, tab, comma and the
+// full-width punctuation a Chinese IME produces are all accepted as
+// separators.
+//
+// The full-width forms are matched in BOTH GBK (code page 936, the Chinese
+// Windows default) and UTF-8, because the same typed character reaches the
+// program as different bytes depending on the console code page. This was
+// confirmed on a real answer stored in training_history.txt, where a typed
+// full-width comma had been written out as the two bytes A3 AC and the answer
+// was then scored wrong.
+DecodedAnswer decodeAnswerToken(const string &text, size_t index)
+{
+    const unsigned char first = static_cast<unsigned char>(text[index]);
+
+    if (first == ' ' || first == '\t' || first == '\r' || first == '\n' ||
+        first == ',')
+    {
+        return {AnswerToken::Separator, 0, 1};
+    }
+
+    if (first >= '1' && first <= '9')
+    {
+        return {AnswerToken::Tile, first - '0', 1};
+    }
+
+    const bool hasSecond = index + 1 < text.size();
+    const bool hasThird = index + 2 < text.size();
+
+    if (hasSecond)
+    {
+        const unsigned char second = static_cast<unsigned char>(text[index + 1]);
+
+        // GBK: full-width digits １..９ (A3 B1..A3 B9) and ０ (A3 B0, rejected)
+        if (first == 0xA3 && second >= 0xB1 && second <= 0xB9)
+        {
+            return {AnswerToken::Tile, second - 0xB0, 2};
+        }
+        // GBK: ， (A3 AC), 、 (A1 A2) and the full-width space (A1 A1)
+        if (first == 0xA3 && second == 0xAC)
+        {
+            return {AnswerToken::Separator, 0, 2};
+        }
+        if (first == 0xA1 && (second == 0xA2 || second == 0xA1))
+        {
+            return {AnswerToken::Separator, 0, 2};
+        }
+    }
+
+    if (hasThird)
+    {
+        const unsigned char second = static_cast<unsigned char>(text[index + 1]);
+        const unsigned char third = static_cast<unsigned char>(text[index + 2]);
+
+        if (first == 0xEF && second == 0xBC)
+        {
+            // UTF-8: full-width digits １..９ (U+FF11..U+FF19)
+            if (third >= 0x91 && third <= 0x99)
+            {
+                return {AnswerToken::Tile, third - 0x90, 3};
+            }
+            // UTF-8: ， (U+FF0C)
+            if (third == 0x8C)
+            {
+                return {AnswerToken::Separator, 0, 3};
+            }
+        }
+        // UTF-8: 、 (U+3001) and the ideographic space (U+3000)
+        if (first == 0xE3 && second == 0x80 && (third == 0x81 || third == 0x80))
+        {
+            return {AnswerToken::Separator, 0, 3};
+        }
+    }
+
+    return {AnswerToken::Invalid, 0, 1};
+}
+
+// Turns the typed answer into a set of waiting tiles, or returns false when it
+// contains anything that is not a tile digit or a separator (so "4.5", "abc4"
+// and "-3" are rejected), or when it holds no digit at all.
 bool parseWaitValues(const string &input, vector<int> &result)
 {
     result.clear();
 
-    // Treat commas as separators too, so "4,7" and "4 7" both work, while
-    // "47", "13", "4.5" or "abc4" stay invalid instead of being mined for
-    // digits.
-    string normalized = input;
-    replace(normalized.begin(), normalized.end(), ',', ' ');
-
-    string token;
-    istringstream iss(normalized);
-    while (iss >> token)
+    for (size_t i = 0; i < input.size();)
     {
-        if (token.size() != 1 || token[0] < '1' || token[0] > '9')
+        const DecodedAnswer decoded = decodeAnswerToken(input, i);
+        if (decoded.token == AnswerToken::Invalid)
         {
             result.clear();
             return false;
         }
+        if (decoded.token == AnswerToken::Tile)
+        {
+            result.push_back(decoded.tileValue);
+        }
 
-        result.push_back(token[0] - '0');
+        i += decoded.length;
+    }
+
+    if (result.empty())
+    {
+        return false;
     }
 
     sort(result.begin(), result.end());
@@ -726,7 +821,7 @@ int main()
     cout << "\n=== Pure suit waiting tile training ===\n";
     cout << "Rule: the program randomly generates valid pure-suit waiting "
             "patterns.\n";
-    cout << "Only enter the waiting numbers, for example: 4 or 5 6\n\n";
+    cout << "Only enter the waiting numbers, for example: 4, 4 7 or 47\n\n";
     printTrainingFileInfo();
 
     ofstream sessionHeader("training_history.txt", ios::app);
@@ -786,7 +881,7 @@ int main()
         if (!answerValid)
         {
             cout << "(Ignored: please enter only tile numbers 1-9, for "
-                    "example \"4\" or \"5 6\".)\n";
+                    "example \"4\", \"4 7\" or \"47\".)\n";
         }
 
         printRoundSummary(correct, ex.wait, seconds);
