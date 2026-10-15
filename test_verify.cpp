@@ -229,34 +229,26 @@ int main()
          << ")\n";
     cout.flush();
 
-    // ---- Test 3: curated shapes + safety-net hands must be valid and in band
+    // ---- Test 3: the per-difficulty safety-net hands must be valid and in band
     Difficulty diffs[3] = {Difficulty::Easy, Difficulty::Medium, Difficulty::Hard};
-    cout << "\n[Test3] curated template shapes and safety nets:\n";
+    cout << "\n[Test3] safety-net hands per difficulty:\n";
     long long bad3 = 0;
     for (Difficulty d : diffs)
     {
-        const vector<vector<int>> &curated = curatedHandsFor(d);
-        for (const vector<int> &h : curated)
-        {
-            if (!checkValid(h) || !inBand((int)findWaitSet(h).size(), d))
-            {
-                ++bad3;
-                cout << "  BAD curated hand for " << formatDifficulty(d) << ": "
-                     << joined(h) << "\n";
-            }
-        }
         const Exercise &fb = lastResortExercise(d);
         const bool fbOk = checkValid(fb.tiles) && !fb.wait.empty() &&
-                          inBand((int)fb.wait.size(), d);
+                          inBand((int)fb.wait.size(), d) &&
+                          fb.wait == findWaitSet(fb.tiles);
         if (!fbOk)
             ++bad3;
-        cout << "  " << formatDifficulty(d) << ": curated=" << curated.size()
-             << "  safetyNet waits={";
+
+        cout << "  " << formatDifficulty(d) << " safety net: " << joined(fb.tiles)
+             << "-> waits {";
         for (int x : fb.wait)
             cout << x << " ";
         cout << "} " << (fbOk ? "OK" : "INVALID") << "\n";
     }
-    cout << "[Test3] invalid curated/safety-net hands: " << bad3 << "\n";
+    cout << "[Test3] invalid safety-net hands: " << bad3 << "\n";
     cout.flush();
 
     // ---- Test 4: simulate long sessions with the REAL generateExercise

@@ -27,11 +27,6 @@ struct Exercise
     set<int> wait;
 };
 
-struct Template
-{
-    vector<int> tiles;
-};
-
 struct TrainingRecord
 {
     string timestamp;
@@ -52,42 +47,6 @@ constexpr int WinSize = HandSize + 1;
 // In a real game every tile exists at most four times.
 constexpr int MaxCopiesPerTile = 4;
 
-// Structure-preserving transform used for the curated templates: a
-// translation that never wraps around (it is only applied while every tile
-// stays inside 1..9) plus an optional mirror (1<->9, 2<->8, ...).
-// The old modulo-9 shift could turn a run such as 6-7-8 into 9-1-2, which
-// silently destroyed the shape the template was meant to teach.
-vector<int> transformTiles(const vector<int> &tiles, int offset, bool mirror)
-{
-    vector<int> result;
-    result.reserve(tiles.size());
-    for (int value : tiles)
-    {
-        result.push_back(mirror ? 10 - value + offset : value + offset);
-    }
-    sort(result.begin(), result.end());
-    return result;
-}
-
-// Smallest and largest offset that keeps every tile of a (possibly mirrored)
-// template inside 1..9. Returns false when no offset works.
-bool validOffsetRange(const vector<int> &tiles, bool mirror, int &low, int &high)
-{
-    int minValue = *min_element(tiles.begin(), tiles.end());
-    int maxValue = *max_element(tiles.begin(), tiles.end());
-    if (mirror)
-    {
-        int mirroredMin = 10 - maxValue;
-        int mirroredMax = 10 - minValue;
-        minValue = mirroredMin;
-        maxValue = mirroredMax;
-    }
-
-    low = 1 - minValue;
-    high = 9 - maxValue;
-    return low <= high;
-}
-
 string handKey(const vector<int> &tiles)
 {
     ostringstream oss;
@@ -96,29 +55,6 @@ string handKey(const vector<int> &tiles)
         oss << value << " ";
     }
     return oss.str();
-}
-
-bool isValidTileCount(const vector<int> &tiles, int expectedSize)
-{
-    if (static_cast<int>(tiles.size()) != expectedSize)
-    {
-        return false;
-    }
-
-    vector<int> counts(10, 0);
-    for (int tile : tiles)
-    {
-        if (tile < 1 || tile > 9)
-        {
-            return false;
-        }
-        ++counts[tile];
-        if (counts[tile] > MaxCopiesPerTile)
-        {
-            return false;
-        }
-    }
-    return true;
 }
 
 bool searchWinning(vector<int> &counts, int meldsUsed, bool pairUsed)
@@ -365,38 +301,6 @@ void saveTrainingRecord(const TrainingRecord &record)
         << "\n";
 }
 
-vector<Template> makeTemplates(Difficulty difficulty)
-{
-    vector<Template> templates;
-
-    if (difficulty == Difficulty::Easy)
-    {
-        templates = {{{1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 5, 6, 7}},
-                     {{1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 6, 7}},
-                     {{2, 2, 2, 3, 3, 3, 4, 4, 5, 6, 7, 8, 9}},
-                     {{1, 1, 1, 3, 3, 3, 4, 5, 6, 7, 8, 8, 9}},
-                     {{1, 1, 2, 2, 3, 3, 4, 5, 6, 7, 7, 8, 9}}};
-    }
-    else if (difficulty == Difficulty::Medium)
-    {
-        templates = {{{1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 6, 7, 8}},
-                     {{1, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8}},
-                     {{1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8, 9}},
-                     {{2, 2, 2, 3, 3, 4, 4, 5, 6, 7, 7, 8, 9}},
-                     {{1, 1, 2, 3, 3, 4, 5, 5, 6, 6, 7, 8, 9}}};
-    }
-    else
-    {
-        templates = {{{1, 1, 2, 2, 3, 3, 4, 4, 5, 6, 7, 8, 9}},
-                     {{1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8, 9}},
-                     {{1, 1, 2, 3, 4, 4, 5, 5, 6, 6, 7, 8, 9}},
-                     {{1, 2, 3, 3, 4, 4, 5, 6, 6, 7, 7, 8, 9}},
-                     {{1, 1, 2, 2, 3, 4, 5, 5, 6, 7, 8, 8, 9}}};
-    }
-
-    return templates;
-}
-
 // ---------------------------------------------------------------------------
 // Difficulty is defined by how many tiles make the hand ready. The three
 // ranges are deliberately DISJOINT so a "Hard" exercise can never turn out to
@@ -430,72 +334,6 @@ Exercise makeExercise(vector<int> tiles)
     sort(ex.tiles.begin(), ex.tiles.end());
     ex.wait = findWaitSet(ex.tiles);
     return ex;
-}
-
-// The curated template shapes, translated (never wrapping around) and
-// mirrored, keeping only the ones whose wait count fits this difficulty.
-vector<vector<int>> buildCuratedHands(Difficulty difficulty)
-{
-    const WaitSpan span = waitSpanFor(difficulty);
-    const vector<Template> templates = makeTemplates(difficulty);
-
-    vector<vector<int>> hands;
-    set<string> seen;
-
-    for (const Template &tpl : templates)
-    {
-        for (int mirrorFlag = 0; mirrorFlag <= 1; ++mirrorFlag)
-        {
-            const bool mirror = mirrorFlag != 0;
-
-            int low = 0;
-            int high = 0;
-            if (!validOffsetRange(tpl.tiles, mirror, low, high))
-            {
-                continue;
-            }
-
-            for (int offset = low; offset <= high; ++offset)
-            {
-                vector<int> tiles = transformTiles(tpl.tiles, offset, mirror);
-                if (!isValidTileCount(tiles, HandSize))
-                {
-                    continue;
-                }
-
-                const string key = handKey(tiles);
-                if (!seen.insert(key).second)
-                {
-                    continue;
-                }
-
-                const int waitCount = static_cast<int>(findWaitSet(tiles).size());
-                if (waitCount >= span.minWaits && waitCount <= span.maxWaits)
-                {
-                    hands.push_back(tiles);
-                }
-            }
-        }
-    }
-
-    return hands;
-}
-
-const vector<vector<int>> &curatedHandsFor(Difficulty difficulty)
-{
-    static const vector<vector<int>> easy = buildCuratedHands(Difficulty::Easy);
-    static const vector<vector<int>> medium = buildCuratedHands(Difficulty::Medium);
-    static const vector<vector<int>> hard = buildCuratedHands(Difficulty::Hard);
-
-    if (difficulty == Difficulty::Easy)
-    {
-        return easy;
-    }
-    if (difficulty == Difficulty::Medium)
-    {
-        return medium;
-    }
-    return hard;
 }
 
 // A random legal pure-suit hand (never more than four copies of a tile).
@@ -549,11 +387,7 @@ const Exercise &lastResortExercise(Difficulty difficulty)
 
 Exercise generateExercise(Difficulty difficulty, set<string> &usedHands)
 {
-    // About one candidate in CuratedMixing comes from the curated shapes.
-    constexpr int CuratedMixing = 8;
-
     const WaitSpan span = waitSpanFor(difficulty);
-    const vector<vector<int>> &curated = curatedHandsFor(difficulty);
 
     // Two cycles: the second one runs with a cleared "already served" set, so
     // it can only miss if the draws keep falling outside the wanted range.
@@ -561,13 +395,7 @@ Exercise generateExercise(Difficulty difficulty, set<string> &usedHands)
     {
         for (int attempt = 0; attempt < 2000; ++attempt)
         {
-            // Roughly one candidate in eight comes from the curated shapes;
-            // the rest are freshly randomised, which is what keeps the pool
-            // effectively unlimited.
-            const bool fromCurated = !curated.empty() && (rand() % CuratedMixing == 0);
-            Exercise ex = makeExercise(fromCurated
-                                           ? curated[rand() % curated.size()]
-                                           : randomHand());
+            Exercise ex = makeExercise(randomHand());
 
             const int waitCount = static_cast<int>(ex.wait.size());
             if (waitCount < span.minWaits || waitCount > span.maxWaits)
